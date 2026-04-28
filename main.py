@@ -42,6 +42,9 @@ class MyBot(commands.Bot):
         
         await self.load_extension("cogs.security")
         print("Модуль безопасности (cogs.security) загружен.")
+        
+        await self.load_extension("cogs.backup")
+        print("Модуль бэкапа (cogs.backup) загружен.")
 
     @tasks.loop(hours=24)
     async def cleanup_task(self):

@@ -1,0 +1,65 @@
+{
+    "guild_id": 1180494586855051335,
+    "name": "Backstage",
+    "roles": [
+        {
+            "name": "?",
+            "color": 10617087,
+            "permissions": 8,
+            "hoist": false,
+            "mentionable": false
+        }
+    ],
+    "categories": [
+        {
+            "name": "Текстовые каналы",
+            "position": 0,
+            "overwrites": {},
+            "channels": [
+                {
+                    "name": "основа",
+                    "type": "text",
+                    "position": 0,
+                    "overwrites": {
+                        "1180494586855051335": {
+                            "allow": 0,
+                            "deny": 0
+                        }
+                    },
+                    "topic": null,
+                    "slowmode": 0,
+                    "nsfw": false
+                },
+                {
+                    "name": "log",
+                    "type": "text",
+                    "position": 1,
+                    "overwrites": {
+                        "1180494586855051335": {
+                            "allow": 0,
+                            "deny": 1024
+                        }
+                    },
+                    "topic": null,
+                    "slowmode": 0,
+                    "nsfw": false
+                },
+                {
+                    "name": "Off the Record",
+                    "type": "voice",
+                    "position": 0,
+                    "overwrites": {
+                        "1180494586855051335": {
+                            "allow": 0,
+                            "deny": 1049600
+                        }
+                    },
+                    "bitrate": 64000,
+                    "user_limit": 0
+                }
+            ]
+        }
+    ],
+    "channels": [],
+    "timestamp": "2026-04-28T19:57:37.769200"
+}
