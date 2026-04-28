@@ -2,21 +2,18 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-
-# Загружаем переменные окружения из файла .env
-load_dotenv()
-
-# Получаем токен из переменных окружения
-TOKEN = os.getenv('TOKEN') or os.getenv('DISCORD_TOKEN')
-
-# Настройка намерений (Intents) для бота
-intents = discord.Intents.default()
-intents.message_content = True  # Разрешает боту читать содержимое сообщений
-intents.members = True          # Разрешает боту видеть участников сервера
-intents.presences = True        # Разрешает боту видеть статусы активности (нужно для некоторых обновлений)
-
 from database import Database
 from discord.ext import tasks
+
+# Загружаем переменные окружения
+load_dotenv()
+TOKEN = os.getenv('TOKEN') or os.getenv('DISCORD_TOKEN')
+
+# Настройка намерений (Intents)
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+intents.presences = True
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -24,27 +21,25 @@ class MyBot(commands.Bot):
         self.db = Database()
 
     async def setup_hook(self):
-        # Инициализация БД
+        # 1. Инициализация БД
         await self.db.initialize()
         
-        # Запуск задачи очистки логов (раз в 24 часа)
+        # 2. Запуск фоновых задач
         self.cleanup_task.start()
 
-        # Загружаем cogs
-        await self.load_extension("cogs.logger")
-        print("Модуль логирования (cogs.logger) загружен.")
+        # 3. Загружаем cogs
+        cogs = ["logger", "profile", "moderation", "security", "backup"]
+        for cog in cogs:
+            try:
+                await self.load_extension(f"cogs.{cog}")
+                print(f"Модуль {cog} загружен.")
+            except Exception as e:
+                print(f"Ошибка загрузки модуля {cog}: {e}")
         
-        await self.load_extension("cogs.profile")
-        print("Модуль профилей (cogs.profile) загружен.")
-        
-        await self.load_extension("cogs.moderation")
-        print("Модуль модерации (cogs.moderation) загружен.")
-        
-        await self.load_extension("cogs.security")
-        print("Модуль безопасности (cogs.security) загружен.")
-        
-        await self.load_extension("cogs.backup")
-        print("Модуль бэкапа (cogs.backup) загружен.")
+        # 4. Синхронизация команд (один раз, глобально)
+        print("Синхронизация команд...")
+        await self.tree.sync()
+        print("Команды синхронизированы.")
 
     @tasks.loop(hours=24)
     async def cleanup_task(self):
@@ -55,27 +50,13 @@ class MyBot(commands.Bot):
         await self.wait_until_ready()
 
     async def on_ready(self):
-        print(f'Бот {self.user} успешно запущен и готов к работе!')
+        print(f'Бот {self.user} запущен! (PID: {os.getpid()})')
         print('---------')
-        
-        # Чтобы не было дубликатов, мы полностью удаляем серверные (локальные) команды.
-        for guild in self.guilds:
-            self.tree.clear_commands(guild=guild)
-            await self.tree.sync(guild=guild)
-            
-        # И оставляем ТОЛЬКО глобальные команды (они дают плашку в профиле).
-        await self.tree.sync()
-        
-        print("Дубликаты удалены, оставлены только 2 глобальные команды. Обновите Discord (Ctrl+R).")
 
 bot = MyBot()
 
-
-
-# Запуск бота
 if __name__ == '__main__':
     if not TOKEN:
-        print("Нет токена в переменных окружения!")
-        exit()
+        print("Ошибка: Токен не найден!")
     else:
         bot.run(TOKEN)

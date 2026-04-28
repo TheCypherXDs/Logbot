@@ -4,16 +4,28 @@ import os
 import aiohttp
 import asyncio
 import discord.utils
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class LoggerCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.last_logs = {} # Кэш для предотвращения дубликатов: {guild_id: (content_hash, timestamp)}
 
     async def send_log(self, guild, log_type, title, description, color=discord.Color.blurple(), user=None):
         """
-        Отправляет красивый Embed с метаданными.
+        Отправляет красивый Embed с метаданными и защитой от дублей.
         """
+        # Анти-дубликат: проверяем, не отправляли ли мы то же самое секунду назад
+        log_hash = hash(f"{log_type}{title}{description}{user.id if user else ''}")
+        now = datetime.now()
+        
+        if guild.id in self.last_logs:
+            old_hash, old_time = self.last_logs[guild.id]
+            if old_hash == log_hash and (now - old_time).total_seconds() < 2:
+                return # Игнорируем дубликат
+
+        self.last_logs[guild.id] = (log_hash, now)
+
         try:
             channel_id = await self.bot.db.get_setting(guild.id, f"log_channel_{log_type}")
             embed = discord.Embed(title=title, description=description, color=color)
@@ -23,21 +35,28 @@ class LoggerCog(commands.Cog):
                 embed.set_author(name=f"{user} (ID: {user.id})", icon_url=user.display_avatar.url)
                 embed.set_footer(text=f"User ID: {user.id}")
             
-            # Отправка в канал
+            # 1. Пытаемся отправить в канал (Priority)
+            sent_to_channel = False
             if channel_id:
                 channel = guild.get_channel(int(channel_id))
+                if not channel: # Если канала нет в кэше, пробуем его получить
+                    try: channel = await guild.fetch_channel(int(channel_id))
+                    except: channel = None
+                
                 if channel:
                     await channel.send(embed=embed)
-                    return
+                    sent_to_channel = True
 
-            # Fallback к вебхукам
-            webhook_urls = [os.getenv('WEBHOOK_URL_1'), os.getenv('WEBHOOK_URL_2')]
-            valid_urls = list(set([url for url in webhook_urls if url and "твой_" not in url]))
-            if valid_urls:
-                async with aiohttp.ClientSession() as session:
-                    for url in valid_urls:
-                        webhook = discord.Webhook.from_url(url, session=session)
-                        await webhook.send(embed=embed)
+            # 2. Если в канал НЕ отправили, пробуем вебхуки (Fallback)
+            if not sent_to_channel:
+                webhook_urls = [os.getenv('WEBHOOK_URL_1'), os.getenv('WEBHOOK_URL_2')]
+                valid_urls = list(set([url for url in webhook_urls if url and "твой_" not in url]))
+                if valid_urls:
+                    async with aiohttp.ClientSession() as session:
+                        for url in valid_urls:
+                            webhook = discord.Webhook.from_url(url, session=session)
+                            await webhook.send(embed=embed)
+                            
         except Exception as e:
             print(f"[Logger Error] {e}")
 
@@ -63,7 +82,6 @@ class LoggerCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member):
-        # Kick check handled in Phase 2, keeping it refined
         executor, reason = None, "Не указана"
         try:
             async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.kick):
@@ -93,11 +111,13 @@ class LoggerCog(commands.Cog):
             join_time_str = await self.bot.db.pop_voice_entry(member.guild.id, member.id)
             duration_str = "Неизвестно"
             if join_time_str:
-                join_time = datetime.fromisoformat(join_time_str)
-                delta = datetime.now() - join_time
-                minutes, seconds = divmod(int(delta.total_seconds()), 60)
-                hours, minutes = divmod(minutes, 60)
-                duration_str = f"{hours}ч {minutes}м {seconds}с"
+                try:
+                    join_time = datetime.fromisoformat(join_time_str)
+                    delta = datetime.now() - join_time
+                    minutes, seconds = divmod(int(delta.total_seconds()), 60)
+                    hours, minutes = divmod(minutes, 60)
+                    duration_str = f"{hours}ч {minutes}м {seconds}с"
+                except: pass
             
             await self.bot.db.log_voice(member.guild.id, member.id, before.channel.id, "LEAVE", duration_str)
             await self.send_log(member.guild, "voice", "🔇 Выход из голоса", f"Вышел из **{before.channel.name}**\n**Длительность:** {duration_str}", discord.Color.red(), user=member)

@@ -9,6 +9,7 @@ class Database:
 
     async def initialize(self):
         async with aiosqlite.connect(self.db_path) as db:
+            # Logs Table
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -19,6 +20,7 @@ class Database:
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            # Warnings Table
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS warnings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,6 +31,7 @@ class Database:
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            # Voice Activity Table
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS voice_activity (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,10 +39,10 @@ class Database:
                     user_id INTEGER,
                     channel_id INTEGER,
                     action TEXT,
-                    duration TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            # Settings Table
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS settings (
                     guild_id INTEGER,
@@ -48,7 +51,7 @@ class Database:
                     PRIMARY KEY (guild_id, key)
                 )
             ''')
-            # Table for tracking temporary voice sessions
+            # Voice Sessions Table
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS voice_sessions (
                     guild_id INTEGER,
@@ -57,6 +60,14 @@ class Database:
                     PRIMARY KEY (guild_id, user_id)
                 )
             ''')
+            
+            # Forced migration for duration column
+            try:
+                await db.execute("ALTER TABLE voice_activity ADD COLUMN duration TEXT")
+                print("[DB] Колонка duration успешно добавлена.")
+            except:
+                pass 
+
             await db.commit()
             print("База данных SQLite инициализирована.")
 
@@ -91,10 +102,17 @@ class Database:
 
     async def log_voice(self, guild_id, user_id, channel_id, action, duration=None):
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "INSERT INTO voice_activity (guild_id, user_id, channel_id, action, duration) VALUES (?, ?, ?, ?, ?)",
-                (guild_id, user_id, channel_id, action, duration)
-            )
+            try:
+                await db.execute(
+                    "INSERT INTO voice_activity (guild_id, user_id, channel_id, action, duration) VALUES (?, ?, ?, ?, ?)",
+                    (guild_id, user_id, channel_id, action, duration)
+                )
+            except aiosqlite.OperationalError:
+                # Fallback if duration column is still missing
+                await db.execute(
+                    "INSERT INTO voice_activity (guild_id, user_id, channel_id, action) VALUES (?, ?, ?, ?)",
+                    (guild_id, user_id, channel_id, action)
+                )
             await db.commit()
 
     async def save_voice_entry(self, guild_id, user_id):
@@ -135,21 +153,13 @@ class Database:
                 row = await cursor.fetchone()
                 return row[0] if row else default
 
-    async def get_all_settings(self, guild_id):
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT key, value FROM settings WHERE guild_id = ?",
-                (guild_id,)
-            ) as cursor:
-                return await cursor.fetchall()
-
     async def cleanup_logs(self):
         thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("DELETE FROM logs WHERE timestamp < ?", (thirty_days_ago,))
             await db.execute("DELETE FROM voice_activity WHERE timestamp < ?", (thirty_days_ago,))
             await db.commit()
-
+            
     async def get_user_logs(self, guild_id, user_id, limit=10):
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(
@@ -157,23 +167,3 @@ class Database:
                 (guild_id, user_id, limit)
             ) as cursor:
                 return await cursor.fetchall()
-
-    async def search_logs(self, guild_id, user_id=None, action=None, date=None, limit=10):
-        query = "SELECT user_id, action, details, timestamp FROM logs WHERE guild_id = ?"
-        params = [guild_id]
-        if user_id: query += " AND user_id = ?"; params.append(user_id)
-        if action: query += " AND action LIKE ?"; params.append(f"%{action}%")
-        if date: query += " AND timestamp LIKE ?"; params.append(f"{date}%")
-        query += " ORDER BY timestamp DESC LIMIT ?"; params.append(limit)
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(query, tuple(params)) as cursor:
-                return await cursor.fetchall()
-
-    async def get_mod_stats(self, guild_id):
-        stats = {}
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT moderator_id, COUNT(*) FROM warnings WHERE guild_id = ? GROUP BY moderator_id", (guild_id,)) as cursor:
-                stats['warns'] = await cursor.fetchall()
-            async with db.execute("SELECT action, COUNT(*) FROM logs WHERE guild_id = ? GROUP BY action", (guild_id,)) as cursor:
-                stats['actions'] = await cursor.fetchall()
-        return stats
